@@ -387,12 +387,18 @@ function segX(p1,p2,p3,p4){
 
 /* ---------------- Chapitres & niveaux ---------------- */
 const CHAPTERS=[
- {name:"L'Apprenti Tisserand",c:'#e8a34d',shape:'rect',sub:"Métier rectangulaire classique",mood:'warm'},
- {name:"Fils de Soie",c:'#e07a5f',shape:'circle',sub:"Le Rouet — plateau circulaire",mood:'silk'},
- {name:"La Cour des Teinturiers",c:'#8fb573',shape:'circle',sub:"Métier circulaire teinté",mood:'nature'},
- {name:"Marché aux Lanternes",c:'#5aa7c9',shape:'circle',sub:"Lanternes & fils lumineux",mood:'night'},
- {name:"Le Grand Métier",c:'#b589c9',shape:'circle',sub:"Rouet monumental",mood:'royal'},
- {name:"Le Fil d'Or",c:'#d9b64a',shape:'circle',sub:"Le métier d'or",mood:'gold'}
+ {name:"L'Apprenti Tisserand",c:'#e8a34d',sub:"Bois clair & fil de lin",mood:'warm',
+  bg:['#1a140c','#0f0c08'], particle:'#e8a34d', frame:'#c48a3a'},
+ {name:"Fils de Soie",c:'#e07a5f',sub:"Soie teinte & soie crue",mood:'silk',
+  bg:['#1a0f12','#0e080a'], particle:'#e07a5f', frame:'#c45a45'},
+ {name:"La Cour des Teinturiers",c:'#8fb573',sub:"Indigo, garance & verdure",mood:'nature',
+  bg:['#0d1410','#070c09'], particle:'#8fb573', frame:'#6a9a55'},
+ {name:"Marché aux Lanternes",c:'#5aa7c9',sub:"Papier de riz & lumière",mood:'night',
+  bg:['#0a1018','#060a10'], particle:'#5aa7c9', frame:'#3d8ab0'},
+ {name:"Le Grand Métier",c:'#b589c9',sub:"Velours & fil d'argent",mood:'royal',
+  bg:['#120e18','#0a0810'], particle:'#b589c9', frame:'#9a6bb0'},
+ {name:"Le Fil d'Or",c:'#d9b64a',sub:"Or et soie impériale",mood:'gold',
+  bg:['#16120a','#0c0a06'], particle:'#d9b64a', frame:'#c9a63a'}
 ];
 const THREADS=['#e8a34d','#e07a5f','#8fb573','#5aa7c9','#b589c9','#d98cb3','#c9b458','#6fbf9e'];
 const LEVELS=60;
@@ -401,11 +407,9 @@ function levelSpec(i){
  const boss=i%10===9;
  const chIdx=Math.min(5,(i/10)|0);
  const ch=CHAPTERS[chIdx];
- // Un peu moins de rangées en circulaire pour garder de l'espace
- let rows=Math.min(16,12+chIdx)+(boss?1:0);
- if(ch.shape==='circle') rows=Math.min(rows,13+(chIdx>2?1:0));
+ const rows=Math.min(16,12+chIdx)+(boss?1:0);
  const cols=Math.min(12,9+(((i+4)/15)|0))+(boss?1:0);
- return{idx:i,boss,rows,cols,cells:rows*cols,ch,shape:ch.shape,chIdx};
+ return{idx:i,boss,rows,cols,cells:rows*cols,ch,shape:'rect',chIdx};
 }
 function parOf(perm){
  const n=perm.length,seen=new Array(n).fill(false);let c=0;
@@ -444,10 +448,10 @@ function genLevel(i){
 
 /* ---------------- Sauvegarde ---------------- */
 const SAVE_KEY='flechesEmmeleesV4';
-let SAVE={snd:true,coach:false,stars:{},tr:[],stats:{safe:0,triple:0}};
+let SAVE={snd:true,coach:false,stars:{},tr:[],col:[],stats:{safe:0,triple:0}};
 try{
  const raw=localStorage.getItem(SAVE_KEY);
- if(raw){const o=JSON.parse(raw);SAVE=Object.assign(SAVE,o);SAVE.stats=Object.assign({safe:0,triple:0},o.stats||{})}
+ if(raw){const o=JSON.parse(raw);SAVE=Object.assign(SAVE,o);SAVE.stats=Object.assign({safe:0,triple:0},o.stats||{});SAVE.col=SAVE.col||[]}
 }catch(e){}
 function persist(){try{localStorage.setItem(SAVE_KEY,JSON.stringify(SAVE))}catch(e){}}
 function levelsDone(){let n=0;for(let i=0;i<LEVELS;i++)if((SAVE.stars[i]|0)>0)n++;return n}
@@ -473,6 +477,35 @@ const TROPHIES=[
  {id:'flawless',n:'Tri Parfait',d:'Finir un niveau au par ou mieux.',ic:'check',c:'#d9b64a'}
 ];
 
+/* ---------------- Collection rare ---------------- */
+const COLLECTION=[
+ {id:'bobbin_wood',n:'Bobine de Bois',d:'Terminer le premier boss (niv.10).',rarity:'rare',c:'#e8a34d'},
+ {id:'silk_spool',n:'Bobine de Soie',d:'Terminer le boss du chapitre Soie.',rarity:'rare',c:'#e07a5f'},
+ {id:'indigo_vial',n:'Fiole d\'Indigo',d:'Terminer le boss des Teinturiers.',rarity:'rare',c:'#8fb573'},
+ {id:'lantern_paper',n:'Papier de Lanterne',d:'Terminer le boss des Lanternes.',rarity:'rare',c:'#5aa7c9'},
+ {id:'silver_shuttle',n:'Navette d\'Argent',d:'Terminer le boss du Grand Métier.',rarity:'epic',c:'#b589c9'},
+ {id:'golden_thread',n:'Fil d\'Or Pur',d:'Terminer le boss final.',rarity:'legendary',c:'#d9b64a'},
+ {id:'perfect_loom',n:'Métier Parfait',d:'3 étoiles sur un boss.',rarity:'epic',c:'#f2c14e'},
+ {id:'star_weaver',n:'Tisserand d\'Étoiles',d:'Obtenir 30 étoiles.',rarity:'rare',c:'#d98cb3'},
+ {id:'no_hint_master',n:'Maître sans Indice',d:'Gagner 10 niveaux sans jamais utiliser d\'indice.',rarity:'epic',c:'#6fbf9e'},
+ {id:'speed_weaver',n:'Tisserand Éclair',d:'Finir 5 niveaux en moins de 60 secondes.',rarity:'epic',c:'#5aa7c9'}
+];
+function hasCol(id){return (SAVE.col||[]).indexOf(id)>=0}
+function unlockCol(id){
+ if(hasCol(id))return false;
+ SAVE.col.push(id);persist();
+ // toast spécial collection
+ const item=COLLECTION.find(x=>x.id===id);
+ if(item){
+  const t=$('#toast');
+  $('#toast-ic').innerHTML=icon('star',22,true);
+  $('#toast-name').textContent=item.n+' ('+item.rarity+')';
+  t.classList.add('on');
+  clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove('on'),3400);
+ }
+ return true;
+}
+
 /* ================================================================
    Cœur du jeu
    ================================================================ */
@@ -485,12 +518,6 @@ function rowY(r){return boardY+(r+0.5)*cellH}
 function sideCX(side,len){const w=Math.max(14,len*cellW-6);return side==='L'?boardX+3+w/2:boardX+boardW-3-w/2}
 function arrowCX(a){return posOf(a).x}
 function tipX(a){
- if(G.spec.shape==='circle'){
-  const p=posOf(a);
-  // Pointe vers l'extérieur
-  const dir=a.side==='L'?-1:1;
-  return p.x + Math.cos(p.ang||0)* (dir>0?8:-8);
- }
  return a.side==='L'?boardX+a.len*cellW-3:boardX+boardW-a.len*cellW+3;
 }
 
@@ -511,51 +538,19 @@ function layoutBoard(){
  if(!G)return;
  const topPad=44,padX=10,padY=10;
  const availW=VW-padX*2,availH=VH-topPad-padY*2;
- const isCircle=G.spec.shape==='circle';
- if(isCircle){
-  // Plateau circulaire : flèches bien espacées sur deux arcs
-  const size=Math.min(availW,availH)*0.94;
-  boardW=size;boardH=size;
-  boardX=(VW-boardW)/2;boardY=topPad+padY+(availH-boardH)/2;
-  // Plus d'espace par flèche
-  cellH=boardH/(G.rows+0.8);
-  cellW=boardW*0.14;
-  arrowH=clamp(cellH*0.42,9,20); // flèches un peu plus petites
-  G.cx=boardX+boardW/2;G.cy=boardY+boardH/2;
-  G.radius=boardW*0.46;
- }else{
-  cellH=Math.min(availH/G.rows,66);
-  cellW=Math.min(availW/G.cols,cellH*1.35,58);
-  boardW=cellW*G.cols;boardH=cellH*G.rows;
-  boardX=(VW-boardW)/2;boardY=topPad+padY+(availH-boardH)/2;
-  arrowH=clamp(cellH*0.52,9,27);
- }
+ cellH=Math.min(availH/G.rows,66);
+ cellW=Math.min(availW/G.cols,cellH*1.35,58);
+ boardW=cellW*G.cols;boardH=cellH*G.rows;
+ boardX=(VW-boardW)/2;boardY=topPad+padY+(availH-boardH)/2;
+ arrowH=clamp(cellH*0.52,9,27);
  sagArr=[];
  const rr=mulberry32(G.idx*31+7);
- for(let p=0;p<G.rows;p++)sagArr.push(cellH*(0.22+0.18*rr()));
+ for(let p=0;p<G.rows;p++)sagArr.push(cellH*(0.28+0.2*rr()));
  for(const a of G.arrows){
-  if(!a.anim){const p=posOf(a);a.px=p.x;a.py=p.y}
+  if(!a.anim){a.px=sideCX(a.side,a.len);a.py=rowY(a.row)}
  }
 }
-function posOf(a){
- if(G.spec.shape==='circle'){
-  // Arc gauche (L) et arc droit (R) bien ouverts
-  const t=(a.row+0.5)/G.rows; // 0..1
-  // Arc beaucoup plus large pour éviter le chevauchement
-  const angSpread=Math.PI*1.05;
-  let ang;
-  if(a.side==='L'){
-   ang=Math.PI + (0.5-t)*angSpread;
-  }else{
-   ang=0 + (t-0.5)*angSpread;
-  }
-  // Rayon plus différencié selon la longueur de la flèche
-  const lenFactor=0.62 + a.len*0.11;
-  const r=G.radius*lenFactor;
-  return{x:G.cx+Math.cos(ang)*r,y:G.cy+Math.sin(ang)*r,ang};
- }
- return{x:sideCX(a.side,a.len),y:rowY(a.row)};
-}
+function posOf(a){return{x:sideCX(a.side,a.len),y:rowY(a.row)};}
 
 /* ---------------- Fils & croisements ---------------- */
 function sampleString(x0,y0,x1,y1,p,n){
@@ -573,8 +568,7 @@ function livePolys(){
  const out=[];
  for(let p=0;p<G.rows;p++){
   const a=G.mapL.get(p),b=G.mapR.get(p);
-  const p1=posOf(a),p2=posOf(b);
-  out.push(sampleString(p1.x,p1.y,p2.x,p2.y,p));
+  out.push(sampleString(tipX(a),a.py,tipX(b),b.py,p));
  }
  return out;
 }
@@ -582,14 +576,7 @@ function polysFor(aL,aR){
  const out=[];
  for(let p=0;p<G.rows;p++){
   const rl=aL.indexOf(p),rr=aR.indexOf(p);
-  // Approximation pour les indices (utilise positions rectangulaires si besoin)
-  if(G.spec.shape==='circle'){
-   const fakeL={side:'L',row:rl,len:G.lenL[p]},fakeR={side:'R',row:rr,len:G.lenR[p]};
-   const p1=posOf(fakeL),p2=posOf(fakeR);
-   out.push(sampleString(p1.x,p1.y,p2.x,p2.y,p,10));
-  }else{
-   out.push(sampleString(boardX+G.lenL[p]*cellW-3,rowY(rl),boardX+boardW-G.lenR[p]*cellW+3,rowY(rr),p,10));
-  }
+  out.push(sampleString(boardX+G.lenL[p]*cellW-3,rowY(rl),boardX+boardW-G.lenR[p]*cellW+3,rowY(rr),p,10));
  }
  return out;
 }
@@ -652,17 +639,10 @@ function flashHintBtn(){
 
 /* ---------------- Échanges ---------------- */
 function startFlight(a,toRow,t0,dur){
- const target={side:a.side,row:toRow,len:a.len};
- const p1=posOf(a),p2=posOf(target);
- a.anim={t0,dur,dir:a.side==='L'?1:-1,x0:a.px,y0:a.py,x1:p2.x,y1:p2.y};
+ a.anim={t0,dur,dir:a.side==='L'?1:-1,x0:a.px,y0:a.py,x1:sideCX(a.side,a.len),y1:rowY(toRow)};
 }
 function flightPos(an,t){
- const e=easeIO(clamp(t,0,1));
- if(G.spec.shape==='circle'){
-  // Arc simple
-  return{x:an.x0+(an.x1-an.x0)*e,y:an.y0+(an.y1-an.y0)*e};
- }
- const Lx=an.dir*cellW*0.9;
+ const e=easeIO(clamp(t,0,1)),Lx=an.dir*cellW*0.9;
  return bezPt({x:an.x0,y:an.y0},{x:an.x0+Lx,y:an.y0},{x:an.x1+Lx,y:an.y1},{x:an.x1,y:an.y1},e);
 }
 function doSwap(a,b,opts){
@@ -777,6 +757,16 @@ function evalTrophies(ctx){
   ['flawless',G.moves<=G.par]
  ];
  for(const c of check)if(c[1]&&!have.has(c[0])){SAVE.tr.push(c[0]);win.push(c[0])}
+ // Collection rare
+ if(G.spec.boss){
+  const bossCol=['bobbin_wood','silk_spool','indigo_vial','lantern_paper','silver_shuttle','golden_thread'];
+  const bi=(G.idx/10)|0;
+  if(bossCol[bi])unlockCol(bossCol[bi]);
+  if(starsFor()===3)unlockCol('perfect_loom');
+ }
+ if(ts>=30)unlockCol('star_weaver');
+ if(G.timeMs<=60000){SAVE.stats.fast=(SAVE.stats.fast|0)+1;if(SAVE.stats.fast>=5)unlockCol('speed_weaver')}
+ if(ctx.noHint){SAVE.stats.noHint=(SAVE.stats.noHint|0)+1;if(SAVE.stats.noHint>=10)unlockCol('no_hint_master')}
  if(win.length)persist();
  return win;
 }
@@ -838,16 +828,10 @@ function hitArrow(x,y){
  for(let i=G.arrows.length-1;i>=0;i--){
   const a=G.arrows[i];
   if(a.anim)continue;
-  if(G.spec.shape==='circle'){
-   const p=posOf(a);
-   const dist=Math.hypot(x-p.x,y-p.y);
-   if(dist<arrowH*2.1)return a; // hitbox un peu plus généreuse
-  }else{
-   const w=a.len*cellW;
-   const x0=a.side==='L'?boardX-6:boardX+boardW-w-6;
-   const x1=a.side==='L'?boardX+w+6:boardX+boardW+6;
-   if(x>=x0&&x<=x1&&Math.abs(y-a.py)<=cellH*0.55)return a;
-  }
+  const w=a.len*cellW;
+  const x0=a.side==='L'?boardX-6:boardX+boardW-w-6;
+  const x1=a.side==='L'?boardX+w+6:boardX+boardW+6;
+  if(x>=x0&&x<=x1&&Math.abs(y-a.py)<=cellH*0.55)return a;
  }
  return null;
 }
@@ -878,27 +862,20 @@ function wood(side){
 }
 function woodHead(side){return side==='L'?'#f0c078':'#7adcc9'}
 function drawArrow(a,now){
- const isCircle=G.spec.shape==='circle';
  const dir=a.side==='L'?1:-1;
- const len=isCircle?Math.max(16,arrowH*2.4 + a.len*1.5):Math.max(14,a.len*cellW-6),h=arrowH;
+ const len=Math.max(14,a.len*cellW-6),h=arrowH;
  let sc=1;
  if(a.anim)sc=1.14;
  else if(G.won)sc=1+0.03*Math.sin(now*0.008+a.pair);
  const isSel=G.sel===a;
  const bob=isSel?Math.sin(now*0.008)*2.1:0;
- const nud=isSel?(isCircle?0:dir*7):0;
+ const nud=isSel?dir*7:0;
  const col=THREADS[a.pair%THREADS.length];
  ctx.save();
  ctx.translate(a.px+nud,a.py+bob);
- if(isCircle){
-  const p=posOf(a);
-  // Oriente la flèche radialement (pointe vers l'extérieur)
-  ctx.rotate((p.ang||0)+(a.side==='L'?Math.PI:0));
- }else if(a.tilt){
-  ctx.rotate(a.tilt);
- }
+ if(a.tilt)ctx.rotate(a.tilt);
  ctx.scale(sc*(isSel?1.08:1),sc*(isSel?1.08:1));
- if(!isCircle)ctx.scale(dir,1);
+ ctx.scale(dir,1);
  const headL=Math.min(h*1.15,len*0.42),bodyL=len-headL;
  if(a.anim){
   ctx.save();
@@ -971,12 +948,17 @@ function render(now){
  if(!cvs)return;
  ctx.clearRect(0,0,VW,VH);
  if(!G||!cellW){drawDust(now);return}
- if(!bgGrad){bgGrad=ctx.createLinearGradient(0,0,0,VH);bgGrad.addColorStop(0,'#101826');bgGrad.addColorStop(1,'#0a0f18')}
+ // Fond teinté selon le chapitre
+ if(!bgGrad){
+  const bg=G.spec.ch.bg||['#101826','#0a0f18'];
+  bgGrad=ctx.createLinearGradient(0,0,0,VH);
+  bgGrad.addColorStop(0,bg[0]);bgGrad.addColorStop(1,bg[1]);
+ }
  ctx.fillStyle=bgGrad;ctx.fillRect(0,0,VW,VH);
  drawDust(now);
  /* plateau */
  const acc=G.spec.ch.c;
- const isCircle=G.spec.shape==='circle';
+ const frameCol=G.spec.ch.frame||acc;
  ctx.save();
  let pulseSc=1;
  if(G.boardPulse&&now-G.boardPulse<420){
@@ -985,32 +967,19 @@ function render(now){
  }
  const cx=boardX+boardW/2,cy=boardY+boardH/2;
  ctx.translate(cx,cy);ctx.scale(pulseSc,pulseSc);ctx.translate(-cx,-cy);
- if(isCircle){
-  ctx.beginPath();
-  ctx.arc(cx,cy,boardW*0.48,0,TAU);
-  ctx.fillStyle='rgba(24,33,49,.55)';ctx.fill();
-  ctx.strokeStyle=acc+(G.won?(''+Math.round(120+60*Math.sin(now*0.006))):'55');
-  if(G.won){ctx.strokeStyle='rgba(242,193,78,'+(0.45+0.25*Math.sin(now*0.006)).toFixed(2)+')'}
-  ctx.lineWidth=2;ctx.stroke();
-  // Anneau intérieur décoratif
-  ctx.beginPath();ctx.arc(cx,cy,boardW*0.18,0,TAU);
-  ctx.strokeStyle='rgba(255,255,255,.06)';ctx.lineWidth=1;ctx.stroke();
- }else{
-  rr(boardX-10,boardY-10,boardW+20,boardH+20,16);
-  ctx.fillStyle='rgba(24,33,49,.55)';ctx.fill();
-  ctx.strokeStyle=acc+(G.won?(''+Math.round(120+60*Math.sin(now*0.006))):'55');
-  if(G.won){ctx.strokeStyle='rgba(242,193,78,'+(0.45+0.25*Math.sin(now*0.006)).toFixed(2)+')'}
-  ctx.lineWidth=1.5;ctx.stroke();
- }
+ rr(boardX-10,boardY-10,boardW+20,boardH+20,16);
+ ctx.fillStyle='rgba(24,33,49,.55)';ctx.fill();
+ ctx.strokeStyle=G.won?'rgba(242,193,78,'+(0.45+0.25*Math.sin(now*0.006)).toFixed(2)+')':frameCol+'99';
+ ctx.lineWidth=2;ctx.stroke();
+ // léger double cadre selon le chapitre
+ ctx.strokeStyle=frameCol+'33';ctx.lineWidth=6;ctx.stroke();
  ctx.restore();
- /* grille de cases (uniquement rectangulaire) */
- if(!isCircle){
-  ctx.strokeStyle='rgba(160,190,225,.07)';ctx.lineWidth=1;
-  ctx.beginPath();
-  for(let c=0;c<=G.cols;c++){const x=boardX+c*cellW;ctx.moveTo(x,boardY);ctx.lineTo(x,boardY+boardH)}
-  for(let r=0;r<=G.rows;r++){const y=boardY+r*cellH;ctx.moveTo(boardX,y);ctx.lineTo(boardX+boardW,y)}
-  ctx.stroke();
- }
+ /* grille de cases */
+ ctx.strokeStyle='rgba(160,190,225,.07)';ctx.lineWidth=1;
+ ctx.beginPath();
+ for(let c=0;c<=G.cols;c++){const x=boardX+c*cellW;ctx.moveTo(x,boardY);ctx.lineTo(x,boardY+boardH)}
+ for(let r=0;r<=G.rows;r++){const y=boardY+r*cellH;ctx.moveTo(boardX,y);ctx.lineTo(boardX+boardW,y)}
+ ctx.stroke();
  /* fils */
  const polys=livePolys();
  const selPair=G.sel?G.sel.pair:-1;
@@ -1122,25 +1091,34 @@ function buildMap(){
     '" data-lv="'+i+'"'+(un?'':' disabled')+'>'+
     (un?(i+1):icon('lock',18))+'<span class="pips">'+pips+'</span></button>';
   }
-  const shapeLabel=CHAPTERS[c].shape==='circle'?' · Rouet circulaire':'';
   html+='<div class="chap" style="--acc:'+CHAPTERS[c].c+'">'+
    '<div class="chap-head"><span class="cbar"></span><div><div class="chap-name">'+CHAPTERS[c].name+
-   '</div><div class="chap-sub">'+done+'/10 niveaux · '+stars+' étoiles'+shapeLabel+'</div></div></div>'+
+   '</div><div class="chap-sub">'+CHAPTERS[c].sub+' · '+done+'/10 · '+stars+'★</div></div></div>'+
    '<div class="tiles">'+tiles+'</div></div>';
  }
  el.innerHTML=html;
 }
 
-/* ---------------- Trophées ---------------- */
+/* ---------------- Trophées + Collection ---------------- */
 function buildTrophies(){
  const el=$('#tr-scroll');
- $('#tr-count').textContent=SAVE.tr.length+'/'+TROPHIES.length;
- let html='';
+ const colCount=(SAVE.col||[]).length;
+ $('#tr-count').textContent=SAVE.tr.length+'/'+TROPHIES.length+' · Col '+colCount+'/'+COLLECTION.length;
+ let html='<div style="color:#8fa0b8;font-size:12px;margin:4px 0 10px;font-weight:700">TROPHÉES</div>';
  for(const t of TROPHIES){
   const has=SAVE.tr.indexOf(t.id)>=0;
   html+='<div class="tcard'+(has?' got':'')+'" style="--acc:'+t.c+'">'+
    '<span class="tic">'+icon(t.ic,26)+'</span>'+
    '<div class="tcol2"><b>'+t.n+'</b><small>'+t.d+'</small></div>'+
+   '<span class="ckmark">'+icon(has?'check':'lock',18)+'</span></div>';
+ }
+ html+='<div style="color:#8fa0b8;font-size:12px;margin:18px 0 10px;font-weight:700">COLLECTION RARE</div>';
+ for(const item of COLLECTION){
+  const has=hasCol(item.id);
+  const rarColor=item.rarity==='legendary'?'#f2c14e':item.rarity==='epic'?'#b589c9':'#8fa0b8';
+  html+='<div class="tcard'+(has?' got':'')+'" style="--acc:'+item.c+'">'+
+   '<span class="tic">'+icon('star',26)+'</span>'+
+   '<div class="tcol2"><b>'+item.n+'</b><small style="color:'+rarColor+'">'+item.rarity.toUpperCase()+' · '+item.d+'</small></div>'+
    '<span class="ckmark">'+icon(has?'check':'lock',18)+'</span></div>';
  }
  el.innerHTML=html;
@@ -1149,9 +1127,8 @@ function buildTrophies(){
 /* ---------------- Bannières, coach, toasts ---------------- */
 function showBanner(){
  const b=$('#banner');
- const shapeTxt=G.spec.shape==='circle'?'Rouet · ':'';
  b.textContent=(G.spec.boss?'Niveau Boss · ':'')+'Niveau '+(G.idx+1)+' · '+G.spec.ch.name+
-  ' — '+shapeTxt+G.rows+' fils · '+G.cells+' cases';
+  ' — '+G.rows+'×'+G.cols+' · '+G.cells+' cases';
  b.classList.remove('show');void b.offsetWidth;b.classList.add('show');
  clearTimeout(b._t);b._t=setTimeout(()=>b.classList.remove('show'),2800);
 }
