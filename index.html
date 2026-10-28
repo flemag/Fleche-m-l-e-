@@ -401,7 +401,9 @@ function levelSpec(i){
  const boss=i%10===9;
  const chIdx=Math.min(5,(i/10)|0);
  const ch=CHAPTERS[chIdx];
- const rows=Math.min(16,12+chIdx)+(boss?1:0);
+ // Un peu moins de rangées en circulaire pour garder de l'espace
+ let rows=Math.min(16,12+chIdx)+(boss?1:0);
+ if(ch.shape==='circle') rows=Math.min(rows,13+(chIdx>2?1:0));
  const cols=Math.min(12,9+(((i+4)/15)|0))+(boss?1:0);
  return{idx:i,boss,rows,cols,cells:rows*cols,ch,shape:ch.shape,chIdx};
 }
@@ -511,15 +513,16 @@ function layoutBoard(){
  const availW=VW-padX*2,availH=VH-topPad-padY*2;
  const isCircle=G.spec.shape==='circle';
  if(isCircle){
-  // Plateau circulaire : flèches sur deux arcs (gauche / droite)
-  const size=Math.min(availW,availH)*0.92;
+  // Plateau circulaire : flèches bien espacées sur deux arcs
+  const size=Math.min(availW,availH)*0.94;
   boardW=size;boardH=size;
   boardX=(VW-boardW)/2;boardY=topPad+padY+(availH-boardH)/2;
-  cellH=boardH/(G.rows+1.5);
-  cellW=boardW*0.18;
-  arrowH=clamp(cellH*0.55,10,26);
+  // Plus d'espace par flèche
+  cellH=boardH/(G.rows+0.8);
+  cellW=boardW*0.14;
+  arrowH=clamp(cellH*0.42,9,20); // flèches un peu plus petites
   G.cx=boardX+boardW/2;G.cy=boardY+boardH/2;
-  G.radius=boardW*0.42;
+  G.radius=boardW*0.46;
  }else{
   cellH=Math.min(availH/G.rows,66);
   cellW=Math.min(availW/G.cols,cellH*1.35,58);
@@ -529,23 +532,25 @@ function layoutBoard(){
  }
  sagArr=[];
  const rr=mulberry32(G.idx*31+7);
- for(let p=0;p<G.rows;p++)sagArr.push(cellH*(0.28+0.22*rr()));
+ for(let p=0;p<G.rows;p++)sagArr.push(cellH*(0.22+0.18*rr()));
  for(const a of G.arrows){
   if(!a.anim){const p=posOf(a);a.px=p.x;a.py=p.y}
  }
 }
 function posOf(a){
  if(G.spec.shape==='circle'){
-  // Arc gauche (L) et arc droit (R)
+  // Arc gauche (L) et arc droit (R) bien ouverts
   const t=(a.row+0.5)/G.rows; // 0..1
-  const angSpread=Math.PI*0.78;
+  // Arc beaucoup plus large pour éviter le chevauchement
+  const angSpread=Math.PI*1.05;
   let ang;
   if(a.side==='L'){
-   ang=Math.PI + (0.5-t)*angSpread; // gauche
+   ang=Math.PI + (0.5-t)*angSpread;
   }else{
-   ang=0 + (t-0.5)*angSpread; // droite
+   ang=0 + (t-0.5)*angSpread;
   }
-  const lenFactor=0.55+a.len*0.09;
+  // Rayon plus différencié selon la longueur de la flèche
+  const lenFactor=0.62 + a.len*0.11;
   const r=G.radius*lenFactor;
   return{x:G.cx+Math.cos(ang)*r,y:G.cy+Math.sin(ang)*r,ang};
  }
@@ -836,7 +841,7 @@ function hitArrow(x,y){
   if(G.spec.shape==='circle'){
    const p=posOf(a);
    const dist=Math.hypot(x-p.x,y-p.y);
-   if(dist<arrowH*1.6)return a;
+   if(dist<arrowH*2.1)return a; // hitbox un peu plus généreuse
   }else{
    const w=a.len*cellW;
    const x0=a.side==='L'?boardX-6:boardX+boardW-w-6;
@@ -875,7 +880,7 @@ function woodHead(side){return side==='L'?'#f0c078':'#7adcc9'}
 function drawArrow(a,now){
  const isCircle=G.spec.shape==='circle';
  const dir=a.side==='L'?1:-1;
- const len=isCircle?Math.max(18,arrowH*2.8):Math.max(14,a.len*cellW-6),h=arrowH;
+ const len=isCircle?Math.max(16,arrowH*2.4 + a.len*1.5):Math.max(14,a.len*cellW-6),h=arrowH;
  let sc=1;
  if(a.anim)sc=1.14;
  else if(G.won)sc=1+0.03*Math.sin(now*0.008+a.pair);
