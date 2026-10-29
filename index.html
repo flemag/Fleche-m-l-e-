@@ -653,9 +653,31 @@ function levelSpec(i){
  const boss=i%10===9;
  const chIdx=Math.min(5,(i/10)|0);
  const ch=CHAPTERS[chIdx];
- const rows=Math.min(16,12+chIdx)+(boss?1:0);
- const cols=Math.min(12,9+(((i+4)/15)|0))+(boss?1:0);
- return{idx:i,boss,rows,cols,cells:rows*cols,ch,shape:'rect',chIdx};
+ let rows=Math.min(16,12+chIdx)+(boss?1:0);
+ let cols=Math.min(12,9+(((i+4)/15)|0))+(boss?1:0);
+
+ // Types de niveaux (à partir du niveau 8 pour ne pas perturber le début)
+ let type='normal';
+ if(i>=8){
+  const cycle=i%7;
+  if(boss) type='boss';
+  else if(cycle===2) type='tunnel';
+  else if(cycle===4) type='dense';
+  else if(cycle===5) type='mirror';
+ }
+ if(type==='tunnel'){ rows=Math.max(8,rows-3); cols=Math.min(14,cols+2); }
+ if(type==='dense'){ rows=Math.min(17,rows+2); cols=Math.max(8,cols-1); }
+
+ // Règle spéciale des boss (une par chapitre)
+ const bossRules=['priority','doublecost','fragile','timed','linked','golden'];
+ const rule=boss?bossRules[chIdx]:null;
+
+ // Objectif secondaire occasionnel (après niveau 12)
+ let secondary=null;
+ if(!boss&&i>=12&&(i%5===1)) secondary='under3'; // descendre sous 3 nœuds avant de finir
+ if(!boss&&i>=18&&(i%7===3)) secondary='noHint';  // gagner sans indice
+
+ return{idx:i,boss,rows,cols,cells:rows*cols,ch,shape:'rect',chIdx,type,rule,secondary};
 }
 function parOf(perm){
  const n=perm.length,seen=new Array(n).fill(false);let c=0;
@@ -668,8 +690,10 @@ function genLevel(i){
  const spec=levelSpec(i),rng=mulberry32(90210+i*7919);
  const rows=spec.rows,cols=spec.cols,budget=cols-3;
  let desired=1+Math.floor((i+4)/5);if(spec.boss)desired++;
- // Légère hausse des longueurs à partir du niveau 10 pour allonger le temps de réflexion
  if(i>=10)desired=Math.min(desired+1,budget-1);
+ if(spec.type==='tunnel') desired=Math.min(budget-1,desired+2);
+ if(spec.type==='dense') desired=Math.max(1,desired-1);
+
  const maxL=Math.max(1,Math.min(desired,Math.ceil(budget/2)));
  const maxR=Math.max(1,Math.min(desired,budget-maxL));
  const lenL=[],lenR=[];
@@ -677,19 +701,44 @@ function genLevel(i){
   lenL.push(clamp(1+Math.floor(Math.pow(rng(),1.7)*maxL),1,maxL));
   lenR.push(clamp(1+Math.floor(Math.pow(rng(),1.7)*maxR),1,maxR));
  }
- const perm=[...Array(rows).keys()];
- // Cible de nœuds un peu plus élevée dès le niveau 8 pour viser ~60s de jeu
- let baseTarget=5+Math.floor(i*0.42);
- if(i>=8)baseTarget+=1;
- if(i>=15)baseTarget+=1;
- const target=Math.min(rows-2,baseTarget);
- let guard=0;
- while(parOf(perm)<target&&guard++<4000){
-  const a=(rng()*rows)|0,b=(rng()*rows)|0;
-  if(a!==b){const t=perm[a];perm[a]=perm[b];perm[b]=t}
+
+ let perm=[...Array(rows).keys()];
+ if(spec.type==='mirror'){
+  for(let r=0;r<rows;r++)perm[r]=r;
+  const swaps=2+((i%3)|0);
+  for(let s=0;s<swaps;s++){
+   const a=(rng()*rows)|0,b=(rng()*rows)|0;
+   if(a!==b){const t=perm[a];perm[a]=perm[b];perm[b]=t}
+  }
+ }else{
+  let baseTarget=5+Math.floor(i*0.42);
+  if(i>=8)baseTarget+=1;
+  if(i>=15)baseTarget+=1;
+  if(spec.type==='dense')baseTarget+=2;
+  if(spec.type==='tunnel')baseTarget=Math.max(3,baseTarget-1);
+  const target=Math.min(rows-2,baseTarget);
+  let guard=0;
+  while(parOf(perm)<target&&guard++<4000){
+   const a=(rng()*rows)|0,b=(rng()*rows)|0;
+   if(a!==b){const t=perm[a];perm[a]=perm[b];perm[b]=t}
+  }
  }
  const inv=[];for(let r=0;r<rows;r++)inv[perm[r]]=r;
- return{spec,rows,cols,cells:rows*cols,par:parOf(perm),lenL,lenR,perm,inv};
+
+ // Fil prioritaire / doré
+ let priority=-1;
+ if(spec.rule==='priority'||spec.rule==='golden'||(i>20&&(i%11===3))){
+  priority=(rng()*rows)|0;
+ }
+
+ // Flèches liées (boss linked) : deux paires liées sur le même côté
+ let linked=null;
+ if(spec.rule==='linked'&&rows>=4){
+  const a=(rng()*rows)|0,b=(a+1+((rng()*(rows-1))|0))%rows;
+  linked=[a,b];
+ }
+
+ return{spec,rows,cols,cells:rows*cols,par:parOf(perm),lenL,lenR,perm,inv,priority,linked};
 }
 
 /* ---------------- Sauvegarde ---------------- */
@@ -1039,10 +1088,31 @@ function doSwap(a,b,opts){
  opts=opts||{};
  if(!G||G.locked||G.won)return;
  if(a.side!==b.side)return;
+ // Flèches liées : le partenaire sur le même côté suit le même déplacement
+ let extra=null;
+ if(G.linked&&!opts._fromLink){
+  const pairs=G.linked;
+  const inLink=pairs.indexOf(a.pair)>=0?a.pair:(pairs.indexOf(b.pair)>=0?b.pair:-1);
+  if(inLink>=0){
+   const otherPair=pairs[0]===inLink?pairs[1]:pairs[0];
+   const partner=G.arrows.find(x=>x.side===a.side&&x.pair===otherPair);
+   if(partner&&partner!==a&&partner!==b){
+    const delta=b.row-a.row;
+    const targetRow=partner.row+delta;
+    const occupant=G.arrows.find(x=>x.side===a.side&&x.row===targetRow&&x!==partner);
+    if(occupant&&targetRow>=0&&targetRow<G.rows){
+     extra={a:partner,b:occupant,rA:partner.row,rB:occupant.row};
+    }
+   }
+  }
+ }
  G.locked=true;G.sel=null;G.hintMark=null;
  const rA=a.row,rB=b.row,now=performance.now(),dur=680;
  startFlight(a,rB,now,dur);startFlight(b,rA,now,dur+50);
- G.pending={a,b,rA,rB,opts,t0:now,dur:dur+50,prev:G.knots};
+ if(extra){
+  startFlight(extra.a,extra.rB,now,dur);startFlight(extra.b,extra.rA,now,dur+50);
+ }
+ G.pending={a,b,rA,rB,opts,t0:now,dur:dur+50,prev:G.knots,extra};
  SFX.swapS();
 }
 function undoMove(){
@@ -1059,7 +1129,16 @@ function restartLevel(){if(G)startLevel(G.idx)}
 /* ---------------- Boucle de mise à jour ---------------- */
 function update(dt,now){
  if(!G)return;
- if(!G.won)G.elapsed+=dt*1000;
+ if(!G.won){
+  G.elapsed+=dt*1000;
+  // Mode contre-la-montre
+  if(G.timeLimit&&G.elapsed>=G.timeLimit&&!G.won){
+   G.locked=true;
+   toastMsg('Temps écoulé','Recommencez le niveau','bolt','#e07a5f');
+   setTimeout(()=>{if(G&&!G.won)restartLevel()},1400);
+   G.timeLimit=0; // éviter de relancer
+  }
+ }
  for(const a of G.arrows){
   if(a.anim){
    const an=a.anim,t=(now-an.t0)/an.dur;
@@ -1079,9 +1158,26 @@ function update(dt,now){
   const pa=posOf(p.a),pb=posOf(p.b);
   p.a.px=pa.x;p.a.py=pa.y;
   p.b.px=pb.x;p.b.py=pb.y;
+  // Appliquer le swap lié
+  if(p.extra){
+   p.extra.a.row=p.extra.rB;p.extra.b.row=p.extra.rA;
+   p.extra.a.anim=null;p.extra.b.anim=null;
+   const ea=posOf(p.extra.a),eb=posOf(p.extra.b);
+   p.extra.a.px=ea.x;p.extra.a.py=ea.y;
+   p.extra.b.px=eb.x;p.extra.b.py=eb.y;
+  }
   refreshCrossings();
-  if(p.opts.record!==false){G.moves++;G.undo.push({side:p.a.side,r1:p.rA,r2:p.rB})}
-  else{G.moves=Math.max(0,G.moves-1)}
+  if(p.opts.record!==false){
+   G.moves+=(G.moveCost||1);
+   G.undo.push({side:p.a.side,r1:p.rA,r2:p.rB,extra:p.extra?{r1:p.extra.rA,r2:p.extra.rB}:null});
+  }else{
+   G.moves=Math.max(0,G.moves-(G.moveCost||1));
+  }
+  // Objectif secondaire : passer sous 3 nœuds
+  if(G.secondary==='under3'&&!G.secondaryDone&&G.knots<3){
+   G.secondaryDone=true;
+   toastMsg('Objectif bonus','Sous 3 nœuds atteint !','star','#f2c14e');
+  }
   SFX.land();
   const d=G.knots-p.prev;
   const mx=(p.a.px+p.b.px)/2,my=(p.a.py+p.b.py)/2;
@@ -1175,14 +1271,24 @@ function triggerWin(){
  if(replay)base=Math.ceil(base/2);
  let daily=0;if(SAVE.bobday!==today()){daily=10;SAVE.bobday=today()}
  const ser=2*Math.min((SAVE.streak|0),10);
- const bob=base+daily+ser;
+ // Bonus objectif secondaire
+ let secBonus=0;
+ if(G.secondary==='under3'&&G.secondaryDone)secBonus=6;
+ if(G.secondary==='noHint'&&!G.usedHint){G.secondaryDone=true;secBonus=8}
+ const bob=base+daily+ser+secBonus;
  SAVE.bob=(SAVE.bob|0)+bob;
- G.reward={base,daily,ser,bob,replay};
+ G.reward={base,daily,ser,secBonus,bob,replay};
  persist();updateHUD();
  SFX.win();
  G.floats.push({x:boardX+boardW/2,y:boardY+boardH*0.38,txt:'+'+bob+' bobines',col:'#f2c14e',t0:performance.now(),big:true});
+ if(G.spec.boss){
+  G.floats.push({x:boardX+boardW/2,y:boardY+boardH*0.28,txt:'Boss vaincu !',col:G.spec.ch.c,t0:performance.now(),big:true});
+  // Célébration renforcée
+  setTimeout(()=>{if(G&&G.won){spawnConfetti();spawnConfetti()}},300);
+  setTimeout(()=>toastMsg('Chapitre','« '+G.spec.ch.name+' » maîtrisé','trophy',G.spec.ch.c),900);
+ }
  setTimeout(()=>{if(G&&G.won)spawnConfetti()},380);
- setTimeout(()=>{if(G&&G.won)showWin(st,news,prev)},1550);
+ setTimeout(()=>{if(G&&G.won)showWin(st,news,prev)},G.spec.boss?2000:1550);
 }
 function spawnConfetti(){
  const cx=boardX+boardW/2,cy=boardY+boardH*0.42;
@@ -1202,7 +1308,12 @@ function startLevel(i){
   lenL:lv.lenL,lenR:lv.lenR,arrows:[],mapL:new Map(),mapR:new Map(),
   moves:0,hints:3,undo:[],sel:null,won:false,locked:false,elapsed:0,
   knots:0,knotPts:[],involved:new Set(),floats:[],confetti:[],
-  hintMark:null,pending:null,usedHint:false,usedUndo:false,winT:0,timeMs:0,coachStep:0,boardPulse:0};
+  hintMark:null,pending:null,usedHint:false,usedUndo:false,winT:0,timeMs:0,coachStep:0,boardPulse:0,
+  priority:lv.priority,linked:lv.linked,type:lv.spec.type,rule:lv.spec.rule,
+  secondary:lv.spec.secondary,secondaryDone:false,
+  moveCost:lv.spec.rule==='doublecost'?2:1,
+  timeLimit:lv.spec.rule==='timed'?90000:0,
+  fragileHits:0};
  for(let p=0;p<lv.rows;p++){
   const L={side:'L',pair:p,row:p,len:lv.lenL[p],px:0,py:0,anim:null,tilt:0};
   const R={side:'R',pair:p,row:lv.inv[p],len:lv.lenR[p],px:0,py:0,anim:null,tilt:0};
@@ -1210,9 +1321,23 @@ function startLevel(i){
  }
  showScreen('game');
  $('#ov-win').classList.remove('on');
+ bgGrad=null; // force le fond teinté du chapitre
  if(SAVE.bonus!==today()){SAVE.bonus=today();G.hints=4;G.bonusHint=true;persist()}
  resize();refreshCrossings();updateHUD();showBanner();
+ // Annonces
+ if(G.type&&G.type!=='normal'){
+  const labels={tunnel:'Niveau Tunnel',dense:'Niveau Dense',mirror:'Niveau Miroir',boss:'Niveau Boss'};
+  setTimeout(()=>toastMsg(labels[G.type]||G.type,G.rule?ruleLabel(G.rule):(G.secondary?secondaryLabel(G.secondary):'Variante'),'bolt',G.spec.ch.c),650);
+ }else if(G.secondary){
+  setTimeout(()=>toastMsg('Objectif bonus',secondaryLabel(G.secondary),'star',G.spec.ch.c),650);
+ }
  if(!SAVE.coach&&i===0){G.coachStep=1;showCoach(1)}else hideCoach();
+}
+function ruleLabel(r){
+ return {priority:'Fil prioritaire doré',doublecost:'Chaque échange = 2 coups',fragile:'Fil fragile (attention)',timed:'Contre la montre (90s)',linked:'Flèches liées',golden:'Fil d\'or prioritaire'}[r]||r;
+}
+function secondaryLabel(s){
+ return {under3:'Passe sous 3 nœuds avant la fin',noHint:'Gagne sans utiliser d\'indice'}[s]||s;
 }
 
 /* ---------------- Entrées ---------------- */
@@ -1387,12 +1512,16 @@ function render(now){
  const selPair=G.sel?G.sel.pair:-1;
  const hintPairs=G.hintMark?[G.hintMark.a.pair,G.hintMark.b.pair]:[];
  for(let p=0;p<polys.length;p++){
-  const pts=polys[p],col=THREADS[p%THREADS.length];
-  const hl=selPair===p||hintPairs.indexOf(p)>=0;
+  const pts=polys[p];
+  const isPrio=G.priority===p;
+  const isLinked=G.linked&&G.linked.indexOf(p)>=0;
+  const col=isPrio?'#f2c14e':THREADS[p%THREADS.length];
+  const hl=selPair===p||hintPairs.indexOf(p)>=0||isPrio||isLinked;
   ctx.beginPath();ctx.moveTo(pts[0].x,pts[0].y);
   for(let k=1;k<pts.length;k++)ctx.lineTo(pts[k].x,pts[k].y);
-  ctx.strokeStyle=col;ctx.globalAlpha=hl?0.34:0.15;ctx.lineWidth=hl?7:5;ctx.stroke();
-  ctx.globalAlpha=hl?1:0.9;ctx.lineWidth=hl?3.2:2.3;
+  ctx.strokeStyle=col;ctx.globalAlpha=hl?0.38:0.15;ctx.lineWidth=hl?(isPrio?8:7):5;ctx.stroke();
+  ctx.globalAlpha=hl?1:0.9;ctx.lineWidth=hl?(isPrio?3.8:3.2):2.3;
+  if(isLinked&&!isPrio){ctx.setLineDash([6,4]);}
   if(G.won){ctx.setLineDash([12,9]);ctx.lineDashOffset=-((now*0.12+p*9)%84)}
   ctx.stroke();ctx.setLineDash([]);
   if(hl&&!G.won){ctx.globalAlpha=.3;ctx.strokeStyle='#fff';ctx.lineWidth=1;ctx.stroke()}
@@ -1457,14 +1586,27 @@ function render(now){
  ctx.globalAlpha=1;
  /* indicateurs */
  drawChip(14,24,'Nœuds : '+G.knots,G.knots>0?'#e58f7b':'#8fd9a0','left');
- drawChip(VW/2,24,fmtTime(G.elapsed),'#cfd8e6','center');
- drawChip(VW-14,24,'Coups '+G.moves+' · par '+G.par,'#cfd8e6','right');
+ let timeTxt=fmtTime(G.elapsed);
+ if(G.timeLimit){
+  const left=Math.max(0,G.timeLimit-G.elapsed);
+  timeTxt=fmtTime(left);
+ }
+ drawChip(VW/2,24,timeTxt,G.timeLimit&&G.elapsed>G.timeLimit*0.75?'#e58f7b':'#cfd8e6','center');
+ const costTag=G.moveCost>1?' (×'+G.moveCost+')':'';
+ drawChip(VW-14,24,'Coups '+G.moves+costTag+' · par '+G.par,'#cfd8e6','right');
+ // Objectif secondaire visible
+ if(G.secondary&&!G.won){
+  const ok=G.secondaryDone||(G.secondary==='noHint'&&!G.usedHint);
+  const label=G.secondary==='under3'?(G.secondaryDone?'Bonus ✓':'Bonus : < 3 nœuds'):(ok?'Sans indice ✓':'Bonus : sans indice');
+  drawChip(VW/2,52,label,ok?'#8fd9a0':'#f2c14e','center');
+ }
 }
 function drawDust(now){
+ const col=(G&&G.spec&&G.spec.ch&&G.spec.ch.particle)?G.spec.ch.particle:'#cfe0f5';
  for(const d of dust){
-  ctx.globalAlpha=0.05+0.04*Math.sin(now*0.001+d.ph);
+  ctx.globalAlpha=0.06+0.05*Math.sin(now*0.001+d.ph);
   ctx.beginPath();ctx.arc(d.x,d.y,d.r,0,TAU);
-  ctx.fillStyle='#cfe0f5';ctx.fill();
+  ctx.fillStyle=col;ctx.fill();
  }
  ctx.globalAlpha=1;
 }
@@ -1541,10 +1683,11 @@ function buildTrophies(){
 /* ---------------- Bannières, coach, toasts ---------------- */
 function showBanner(){
  const b=$('#banner');
- b.textContent=(G.spec.boss?'Niveau Boss · ':'')+'Niveau '+(G.idx+1)+' · '+G.spec.ch.name+
-  ' — '+G.rows+'×'+G.cols+' · '+G.cells+' cases'+(G.bonusHint?' · +1 indice du jour':'');
+ const typeTag={tunnel:' · Tunnel',dense:' · Dense',mirror:' · Miroir',boss:' · Boss'}[G.type]||'';
+ b.textContent='Niveau '+(G.idx+1)+' · '+G.spec.ch.name+typeTag+
+  ' — '+G.rows+'×'+G.cols+(G.bonusHint?' · +1 indice':'');
  b.classList.remove('show');void b.offsetWidth;b.classList.add('show');
- clearTimeout(b._t);b._t=setTimeout(()=>b.classList.remove('show'),2800);
+ clearTimeout(b._t);b._t=setTimeout(()=>b.classList.remove('show'),3000);
 }
 const COACH_TXT=['',
  '<b>1.</b> Touchez une flèche pour la sélectionner (elle pulse).',
